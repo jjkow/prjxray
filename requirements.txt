@@ -1,4 +1,4 @@
-fasm
+pyfasm
 futures
 intervaltree
 junit-xml

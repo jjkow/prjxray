@@ -2,12 +2,12 @@
 # Your ROI should at least have a SLICEL on the left
 
 # Number of package inputs going to ROI
-set DIN_N 8
+set DIN_N 1
 if { [info exists ::env(DIN_N) ] } {
     set DIN_N "$::env(DIN_N)"
 }
 # Number of ROI outputs going to package
-set DOUT_N 8
+set DOUT_N 4
 if { [info exists ::env(DOUT_N) ] } {
     set DOUT_N "$::env(DOUT_N)"
 }
@@ -88,7 +88,7 @@ set pincfg ""
 if { [info exists ::env(XRAY_PINCFG) ] } {
     set pincfg "$::env(XRAY_PINCFG)"
 }
-set roiv "../roi_base.v"
+set roiv "../test.v"
 if { [info exists ::env(XRAY_ROIV) ] } {
     set roiv "$::env(XRAY_ROIV)"
 }
@@ -103,22 +103,41 @@ puts "  Y_DOUT_BASE: $Y_DOUT_BASE"
 
 source ../../../utils/utils.tcl
 
+# Create Project for Zybo board
 create_project -force -part $::env(XRAY_PART) design design
-read_verilog ../top.v
+set proj_dir [get_property directory [current_project]]
+set obj [current_project]
+set_property -name "board_part" -value "digilentinc.com:zybo:part0:1.0" -objects $obj
+set_property -name "dsa.board_id" -value "zybo" -objects $obj
+set_property target_language Verilog [current_project]
+
+# Prepare BD with PS7 ZYNQ
+create_bd_design "design_0"
+open_bd_design {./design/design.srcs/sources_1/bd/design_0/design_0.bd}
+create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0
+set_property -dict [list CONFIG.preset {ZC702}] [get_bd_cells processing_system7_0]
+apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 -config {make_external "FIXED_IO, DDR" apply_board_preset "1" Master "Disable" Slave "Disable" }  [get_bd_cells processing_system7_0]
+connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK]
+
+# Add Blackbox
+read_verilog ../blackbox.v
 read_verilog $roiv
-set fixed_xdc ""
-if { [info exists ::env(XRAY_FIXED_XDC) ] } {
-    set fixed_xdc "$::env(XRAY_FIXED_XDC)"
-}
+create_bd_cell -type module -reference blackbox blackbox
+apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config {Clk "/processing_system7_0/FCLK_CLK0 (100 MHz)" }  [get_bd_pins blackbox/clk]
+make_bd_pins_external  [get_bd_pins blackbox/din]
+make_bd_pins_external  [get_bd_pins blackbox/dout]
+update_compile_order -fileset sources_1
 
-# added flatten_hierarchy
-# dout_shr was getting folded into the pblock
-# synth_design -top top -flatten_hierarchy none -no_lc -keep_equivalent_registers -resource_sharing off
-synth_design -top top -flatten_hierarchy none -verilog_define DIN_N=$DIN_N -verilog_define DOUT_N=$DOUT_N
+# Prepare everything to synth
+set_property synth_checkpoint_mode Hierarchical [get_files ./design/design.srcs/sources_1/bd/design_0/design_0.bd]
+make_wrapper -files [get_files ./design/design.srcs/sources_1/bd/design_0/design_0.bd] -top
+add_files -norecurse ./design/design.srcs/sources_1/bd/design_0/hdl/design_0_wrapper.v
+set_property top design_0_wrapper [current_fileset]
+update_compile_order -fileset sources_1
 
-if {$fixed_xdc ne ""} {
-    read_xdc $fixed_xdc
-}
+launch_runs synth_1 -jobs 4
+wait_on_run synth_1
+open_run synth_1 -name synth_1
 
 # Map of top level net names to IOB pin names
 array set net2pin [list]
@@ -128,21 +147,18 @@ if {$part eq "xc7z010clg400-1"} {
         # https://github.com/Digilent/digilent-xdc/blob/master/Zybo-Z7-Master.xdc
 
         # Slide switches and buttons
-        set sumin "V12 W16 J15 H15"
-        set sumout "V13 N15 L14 L15"
+        # TODO: Import XDC?
+        set din "T16"
+        set dout "M14 M15 G14 D18"
 
         # 125 MHz CLK onboard
-        set pin "K17"
-        set net2pin(clk) $pin
-
-        for {set i 0} {$i < $DIN_N} {incr i} {
-            set pin [lindex $sumin $i]
-            set net2pin(sumin[$i]) $pin
-        }
+        #set pin "K17"
+        #set net2pin(clk) $pin
+        set net2pin(din) $din
 
         for {set i 0} {$i < $DOUT_N} {incr i} {
-            set pin [lindex $sumout $i]
-            set net2pin(sumout[$i]) $pin
+            set pin [lindex $dout $i]
+            set net2pin(dout[$i]) $pin
         }
 
         # setting Y_OFFSET to zero only for zynq parts
@@ -162,23 +178,23 @@ foreach {net pin} [array get net2pin] {
     set_property -dict "PACKAGE_PIN $pin IOSTANDARD LVCMOS33" [get_ports $net]
 }
 
-if {$fixed_xdc eq ""} {
-    create_pblock roi
-    set_property EXCLUDE_PLACEMENT 1 [get_pblocks roi]
-    set_property CONTAIN_ROUTING true [get_pblocks roi]
-    set_property DONT_TOUCH true [get_cells roi]
-    add_cells_to_pblock [get_pblocks roi] [get_cells roi]
-    resize_pblock [get_pblocks roi] -add "$::env(XRAY_ROI)"
+create_pblock roi
+set_property EXCLUDE_PLACEMENT 1 [get_pblocks roi]
+set_property CONTAIN_ROUTING true [get_pblocks roi]
+# Because the Blackbox is under design_0_wrapper, we do not have roi cells
+set_property DONT_TOUCH true [get_cells design_0_i/blackbox]
+add_cells_to_pblock [get_pblocks roi] [get_cells design_0_i/blackbox]
+resize_pblock [get_pblocks roi] -add "$::env(XRAY_ROI)"
 
-    set_property CFGBVS VCCO [current_design]
-    set_property CONFIG_VOLTAGE 3.3 [current_design]
-    #set_property BITSTREAM.GENERAL.PERFRAMECRC YES [current_design]
+set_property CFGBVS VCCO [current_design]
+set_property CONFIG_VOLTAGE 3.3 [current_design]
+#set_property BITSTREAM.GENERAL.PERFRAMECRC YES [current_design]
 
-    set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_IBUF]
+#set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_IBUF]
 
-    #write_checkpoint -force synth.dcp
-}
+#write_checkpoint -force synth.dcp
 
+# Place everything
 place_design
 write_checkpoint -force placed.dcp
 
@@ -210,15 +226,6 @@ close $fp_wires
 
 puts "routing design"
 route_design
-
-# Don't set for user designs
-# Makes things easier to debug
-if {$fixed_xdc eq ""} {
-    set_property IS_ROUTE_FIXED 1 [get_nets -hierarchical]
-    #set_property IS_LOC_FIXED 1 [get_cells -hierarchical]
-    #set_property IS_BEL_FIXED 1 [get_cells -hierarchical]
-    write_xdc -force fixed.xdc
-}
 
 write_checkpoint -force design.dcp
 #set_property BITSTREAM.GENERAL.DEBUGBITSTREAM YES [current_design]

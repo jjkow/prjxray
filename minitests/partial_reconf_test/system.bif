@@ -1,0 +1,5 @@
+//arch = zynq; split = false; format = BIN
+the_ROM_image:
+{
+	/home/jkow/magisterka/reconfig-mgr/prjxray/minitests/partial_reconf_test/build/design.bit
+}

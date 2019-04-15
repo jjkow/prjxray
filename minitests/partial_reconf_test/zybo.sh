@@ -34,4 +34,7 @@ export XRAY_ROI_DIN_RPIP="WW2BEG1"
 export XRAY_ROI_DOUT_LPIP=
 export XRAY_ROI_DOUT_RPIP="EE2BEG0"
 
+export WITH_ZYNQ=0
+export WITH_BOOTGEN=0
+
 source $XRAY_DIR/utils/environment.sh

@@ -1,6 +1,8 @@
 # WARNING: this is somewhat paramaterized, but is only tested on A50T/A35T with the traditional ROI
 # Your ROI should at least have a SLICEL on the left
 
+set WITH_ZYNQ "$::env(WITH_ZYNQ)"
+
 # Number of package inputs going to ROI
 set DIN_N 1
 if { [info exists ::env(DIN_N) ] } {
@@ -100,44 +102,59 @@ puts "  X_BASE: $X_BASE"
 puts "  Y_DIN_BASE: $Y_DIN_BASE"
 puts "  Y_CLK_BASE: $Y_CLK_BASE"
 puts "  Y_DOUT_BASE: $Y_DOUT_BASE"
+puts "  WITH_ZYNQ: $WITH_ZYNQ"
 
 source ../../../utils/utils.tcl
 
-# Create Project for Zybo board
-create_project -force -part $::env(XRAY_PART) design design
-set proj_dir [get_property directory [current_project]]
-set obj [current_project]
-set_property -name "board_part" -value "digilentinc.com:zybo:part0:1.0" -objects $obj
-set_property -name "dsa.board_id" -value "zybo" -objects $obj
-set_property target_language Verilog [current_project]
-
-# Prepare BD with PS7 ZYNQ
-create_bd_design "design_0"
-open_bd_design {./design/design.srcs/sources_1/bd/design_0/design_0.bd}
-create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0
-set_property -dict [list CONFIG.preset {ZC702}] [get_bd_cells processing_system7_0]
-apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 -config {make_external "FIXED_IO, DDR" apply_board_preset "1" Master "Disable" Slave "Disable" }  [get_bd_cells processing_system7_0]
-connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK]
-
-# Add Blackbox
-read_verilog ../blackbox.v
-read_verilog $roiv
-create_bd_cell -type module -reference blackbox blackbox
-apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config {Clk "/processing_system7_0/FCLK_CLK0 (100 MHz)" }  [get_bd_pins blackbox/clk]
-make_bd_pins_external  [get_bd_pins blackbox/din]
-make_bd_pins_external  [get_bd_pins blackbox/dout]
-update_compile_order -fileset sources_1
-
-# Prepare everything to synth
-set_property synth_checkpoint_mode Hierarchical [get_files ./design/design.srcs/sources_1/bd/design_0/design_0.bd]
-make_wrapper -files [get_files ./design/design.srcs/sources_1/bd/design_0/design_0.bd] -top
-add_files -norecurse ./design/design.srcs/sources_1/bd/design_0/hdl/design_0_wrapper.v
-set_property top design_0_wrapper [current_fileset]
-update_compile_order -fileset sources_1
-
-launch_runs synth_1 -jobs 4
-wait_on_run synth_1
-open_run synth_1 -name synth_1
+if { $WITH_ZYNQ eq "0" } {
+    create_project -force -part $::env(XRAY_PART) design design
+    read_verilog ../blackbox.v
+    read_verilog $roiv
+    set fixed_xdc ""
+    if { [info exists ::env(XRAY_FIXED_XDC) ] } {
+        set fixed_xdc "$::env(XRAY_FIXED_XDC)"
+    }
+    
+    synth_design -top blackbox -flatten_hierarchy none -verilog_define DIN_N=$DIN_N -verilog_define DOUT_N=$DOUT_N
+} else {
+    # Create Project for Zybo board
+    create_project -force -part $::env(XRAY_PART) design design
+    set proj_dir [get_property directory [current_project]]
+    set obj [current_project]
+    set_property -name "board_part" -value "digilentinc.com:zybo:part0:1.0" -objects $obj
+    set_property -name "dsa.board_id" -value "zybo" -objects $obj
+    set_property target_language Verilog [current_project]
+    
+    # Prepare BD with PS7 ZYNQ
+    create_bd_design "design_0"
+    open_bd_design {./design/design.srcs/sources_1/bd/design_0/design_0.bd}
+    create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0
+    set_property -dict [list CONFIG.preset {ZC702}] [get_bd_cells processing_system7_0]
+    apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 -config {make_external "FIXED_IO, DDR" apply_board_preset "1" Master "Disable" Slave "Disable" }  [get_bd_cells processing_system7_0]
+    connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK]
+    
+    # ROI DEPENDENT ---
+    # Add Blackbox
+    read_verilog ../blackbox.v
+    read_verilog $roiv
+    create_bd_cell -type module -reference blackbox blackbox
+    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config {Clk "/processing_system7_0/FCLK_CLK0 (100 MHz)" }  [get_bd_pins blackbox/clk]
+    make_bd_pins_external  [get_bd_pins blackbox/din]
+    make_bd_pins_external  [get_bd_pins blackbox/dout]
+    update_compile_order -fileset sources_1
+    # --- ROI DEPENDENT
+    
+    # Prepare everything to synth
+    set_property synth_checkpoint_mode Hierarchical [get_files ./design/design.srcs/sources_1/bd/design_0/design_0.bd]
+    make_wrapper -files [get_files ./design/design.srcs/sources_1/bd/design_0/design_0.bd] -top
+    add_files -norecurse ./design/design.srcs/sources_1/bd/design_0/hdl/design_0_wrapper.v
+    set_property top design_0_wrapper [current_fileset]
+    update_compile_order -fileset sources_1
+    
+    launch_runs synth_1 -jobs 4
+    wait_on_run synth_1
+    open_run synth_1 -name synth_1
+}
 
 # Map of top level net names to IOB pin names
 array set net2pin [list]
@@ -151,9 +168,12 @@ if {$part eq "xc7z010clg400-1"} {
         set din "T16"
         set dout "M14 M15 G14 D18"
 
-        # 125 MHz CLK onboard
-        #set pin "K17"
-        #set net2pin(clk) $pin
+        if { $WITH_ZYNQ eq "0" } {
+            # 125 MHz CLK onboard
+            set pin "K17"
+            set net2pin(clk) $pin
+        }
+
         set net2pin(din) $din
 
         for {set i 0} {$i < $DOUT_N} {incr i} {
@@ -182,8 +202,13 @@ create_pblock roi
 set_property EXCLUDE_PLACEMENT 1 [get_pblocks roi]
 set_property CONTAIN_ROUTING true [get_pblocks roi]
 # Because the Blackbox is under design_0_wrapper, we do not have roi cells
-set_property DONT_TOUCH true [get_cells design_0_i/blackbox]
-add_cells_to_pblock [get_pblocks roi] [get_cells design_0_i/blackbox]
+if { $WITH_ZYNQ eq 0 } {
+    set_property DONT_TOUCH true [get_cells test]
+    add_cells_to_pblock [get_pblocks roi] [get_cells test]
+} else {
+    set_property DONT_TOUCH true [get_cells design_0_i/blackbox]
+    add_cells_to_pblock [get_pblocks roi] [get_cells design_0_i/blackbox]
+}
 resize_pblock [get_pblocks roi] -add "$::env(XRAY_ROI)"
 
 set_property CFGBVS VCCO [current_design]

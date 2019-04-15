@@ -29,34 +29,30 @@ fi
 echo ${DIN_N}
 echo ${DOUT_N}
 echo ${XRAY_ROI}
+echo ${WITH_ZYNQ}
 
 mkdir -p $BUILD_DIR
 pushd $BUILD_DIR
 
-#cat >defines.v <<EOF
-#\`ifndef DIN_N
-#\`define DIN_N $DIN_N
-#\`endif
-#
-#\`ifndef DOUT_N
-#\`define DOUT_N $DOUT_N
-#\`endif
-#EOF
-
 ${XRAY_VIVADO} -mode batch -source ../runme.tcl
 test -z "$(fgrep CRITICAL vivado.log)"
-source ${XRAY_VIVADO_BOOTGEN}
-bootgen -image ../system.bif -w -o ../design.bit.bin
+if [ "$WITH_BOOTGEN" = 1 ]; then
+    bootgen -image ../system.bif -w -o ../design.bit.bin
+fi
 
-#${XRAY_BITREAD} -F $XRAY_ROI_FRAMES -o design.bits -z -y design.bit
-#python3 ${XRAY_DIR}/utils/bit2fasm.py --verbose design.bit > design.fasm
-#python3 ${XRAY_DIR}/utils/fasm2frames.py design.fasm design.frm
+sleep 5
+
+${XRAY_BITREAD} -F $XRAY_ROI_FRAMES -o design.bits -z -y build/design.bit
+python3 ${XRAY_DIR}/utils/bit2fasm.py --verbose build/design.bit > design.fasm
+python3 ${XRAY_DIR}/utils/fasm2frames.py design.fasm design.frm
+
+
 #PYTHONPATH=$PYTHONPATH:$XRAY_DIR/utils python3 ../create_design_json.py \
 #    --design_info_txt design_info.txt \
 #    --design_txt design.txt \
 #    --pad_wires design_pad_wires.txt \
 #    --design_fasm design.fasm > design.json
-#
+
 ## Hack to get around weird clock error related to clk net not found
 ## Remove following lines:
 ##set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_IBUF]

@@ -2,7 +2,7 @@
 
 module test(input clk,
     input din, output reg [3:0] dout);
-    parameter DIN_N = 4;
+    parameter DIN_N = 1;
     parameter DOUT_N = 4;
     reg [3:0] result = 0;
     reg [31:0] ticks = 0;

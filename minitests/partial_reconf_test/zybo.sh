@@ -2,7 +2,7 @@
 export XRAY_PART=xc7z010clg400-1
 export XRAY_PINCFG=ZYBOZ7-SWBUT
 export XRAY_DIN_N_LARGE=1
-export XRAY_DOUT_N_LARGE=4
+export XRAY_DOUT_N_LARGE=3
 
 # For generating DB
 export XRAY_PIN_00="G15"
@@ -34,7 +34,10 @@ export XRAY_ROI_DIN_RPIP="WW2BEG1"
 export XRAY_ROI_DOUT_LPIP=
 export XRAY_ROI_DOUT_RPIP="EE2BEG0"
 
-export WITH_ZYNQ=0
+export WITH_ZYNQ=1
 export WITH_BOOTGEN=0
+export WITH_BLACKBOX=1
+export WITH_TEST1=0
+export WITH_TEST2=0
 
 source $XRAY_DIR/utils/environment.sh

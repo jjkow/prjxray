@@ -27,13 +27,13 @@ echo "Design .fasm: $fasm_in"
 echo "Harness .bit: $bit_in"
 echo "Out .bit: $bit_out"
 
-${XRAY_FASM2FRAMES} --sparse $fasm_in roi_partial.frm
+${XRAY_FASM2FRAMES} --sparse $fasm_in partial.frm
 
 ${XRAY_TOOLS_DIR}/xc7patch \
 	--part_name ${XRAY_PART} \
 	--part_file ${XRAY_PART_YAML} \
 	--bitstream_file $bit_in \
-	--frm_file roi_partial.frm \
+	--frm_file partial.frm \
 	--output_file $bit_out
 
 #openocd -f $XRAY_DIR/utils/openocd/board-digilent-basys3.cfg -c "init; pld load 0 $bit_out; exit"

@@ -1,9 +1,10 @@
-// Blackbox is an empty module with connected CLK and LUT6 for douts
-// with no logic inside.
+// Test1 partial module - incrementing 3 bit counter
 
-module test(input wire clk,
-        output wire [2:0] dout);
+module test(input clk,
+    output wire [2:0] dout);
     parameter DOUT_N = 3;
+    reg [2:0] result = 0;
+    reg [31:0] ticks = 0;
 
     genvar i;
     generate
@@ -20,7 +21,7 @@ module test(input wire clk,
             LUT6 #(
                 .INIT(64'b10)
             ) lut (
-                .I0(1'b0),
+                .I0(result[i]),
                 .I1(1'b0),
                 .I2(1'b0),
                 .I3(1'b0),
@@ -28,6 +29,19 @@ module test(input wire clk,
                 .I5(1'b0),
                 .O(dout[i]));
         end
+
+        (* KEEP, DONT_TOUCH *)
+        always @(posedge clk) begin
+            ticks <= ticks + 1;
+            if(ticks > 10000000) begin
+                ticks <= 0;
+                if(result > 6) begin
+                    result <= 0;
+                end
+                else begin
+                    result <= result + 1;
+                end
+            end
+        end
     endgenerate
 endmodule
-

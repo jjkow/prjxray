@@ -164,37 +164,27 @@ if { $WITH_ZYNQ eq 0 } {
     apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 -config {make_external "FIXED_IO, DDR" apply_board_preset "1" Master "Disable" Slave "Disable" }  [get_bd_cells processing_system7_0]
     connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK]
     
-    # ROI DEPENDENT ---
     if { $WITH_BLACKBOX eq 1 } {
         set roiv "../blackbox.v"
-        read_verilog ../roib.v
-        set top_module_name "roib"
-        set module_name "blackbox"
-        read_verilog $roiv
-        set roiv_trim [string map {.v v} $roiv]
     } elseif { $WITH_TEST1 eq 1 } {
         set roiv "../test1.v"
-        read_verilog ../roi1.v
-        set top_module_name "roi1"
-        set module_name "test1"
-        read_verilog $roiv
-        set roiv_trim [string map {.v v} $roiv]
     } elseif { $WITH_TEST2 eq 1 } {
         set roiv "../test2.v"
-        read_verilog ../roi2.v
-        set top_module_name "roi2"
-        set module_name "test2"
-        read_verilog $roiv
-        set roiv_trim [string map {.v v} $roiv]
     } else {
         error "No BLACKBOX nor TEST1 nor TEST2 is set!"
     }
-    create_bd_cell -type module -reference $module_name $module_name
-    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config {Clk "/processing_system7_0/FCLK_CLK0 (100 MHz)" }  [get_bd_pins $module_name/clk]
+
+    read_verilog ../roi.v
+    set top_module_name "roi"
+    set module_name "test"
+    read_verilog $roiv
+
+    create_bd_cell -type module -reference $top_module_name $top_module_name
+    apply_bd_automation -rule xilinx.com:bd_rule:clkrst -config {Clk "/processing_system7_0/FCLK_CLK0 (100 MHz)" }  [get_bd_pins $top_module_name/clk]
     #make_bd_pins_external  [get_bd_pins $module_name/din]
-    make_bd_pins_external  [get_bd_pins $module_name/dout]
+    make_bd_pins_external  [get_bd_pins $top_module_name/dout]
+    make_bd_pins_external  [get_bd_pins $top_module_name/blinky]
     update_compile_order -fileset sources_1
-    # --- ROI DEPENDENT
     
     # Prepare everything to synth
     set_property synth_checkpoint_mode Hierarchical [get_files ./design/design.srcs/sources_1/bd/design_0/design_0.bd]
@@ -218,7 +208,8 @@ if {$part eq "xc7z010clg400-1"} {
         # Slide switches and buttons
         # TODO: Import XDC?
 
-        set outs "M14 M15 G14 D18"
+        set outs "M14 M15 G14"
+        set blinky "D18"
 
         if { $WITH_ZYNQ eq 0 } {
             # 125 MHz CLK onboard
@@ -232,6 +223,8 @@ if {$part eq "xc7z010clg400-1"} {
             set pin [lindex $outs $i]
             set net2pin(dout[$i]) $pin
         }
+
+        set net2pin(blinky) $blinky
 
         # setting Y_OFFSET to zero only for zynq parts
         set Y_OFFSET 0
@@ -261,8 +254,8 @@ if { $WITH_ZYNQ eq 0 } {
     add_cells_to_pblock [get_pblocks roi] [get_cells $module_name]
     set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_IBUF]
 } else {
-    set_property DONT_TOUCH true [get_cells design_0_i/$module_name]
-    add_cells_to_pblock [get_pblocks roi] [get_cells design_0_i/$module_name]
+    set_property DONT_TOUCH true [get_cells design_0_i/$top_module_name/inst/$module_name]
+    add_cells_to_pblock [get_pblocks roi] [get_cells design_0_i/$top_module_name/inst/$module_name]
     set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets design_0_i/processing_system7_0/inst/FCLK_CLK0]
 }
 resize_pblock [get_pblocks roi] -add "$::env(XRAY_ROI)"
@@ -271,7 +264,7 @@ set_property CFGBVS VCCO [current_design]
 set_property CONFIG_VOLTAGE 3.3 [current_design]
 #set_property BITSTREAM.GENERAL.PERFRAMECRC YES [current_design]
 
-proc loc_roi_clk_left {ff_x ff_y module_name WITH_ZYNQ} {
+proc loc_roi_clk_left {ff_x ff_y top_module_name module_name WITH_ZYNQ} {
     # Place an ROI clk on the left edge of the ROI
     # It doesn't actually matter where we place this, just do it to keep things neat looking
     # ff_x: ROI SLICE X position
@@ -280,11 +273,11 @@ proc loc_roi_clk_left {ff_x ff_y module_name WITH_ZYNQ} {
     set slice_ff "SLICE_X${ff_x}Y${ff_y}"
 
     # Fix FFs to guide route in
-    # TODO test1/2
+    # TODO non ZYNQ
     if { $WITH_ZYNQ eq 0 } {
         set cell [get_cells "${module_name}/clk_reg_reg"]
     } else {
-        set cell [get_cells "design_0_i/$module_name/inst/clk_reg_reg"]
+        set cell [get_cells "design_0_i/$top_module_name/inst/$module_name/clk_reg_reg"]
     }
     set_property LOC $slice_ff $cell
     set_property BEL AFF $cell
@@ -305,7 +298,7 @@ proc loc_roi_clk_left {ff_x ff_y module_name WITH_ZYNQ} {
 #    set_property BEL A6LUT $cell
 #}
 
-proc loc_lut_out {index lut_x lut_y module_name WITH_ZYNQ} {
+proc loc_lut_out {index lut_x lut_y top_module_name module_name WITH_ZYNQ} {
     # Place a lut at specified coordinates in BEL A
     # index: input bus index
     # lut_x: SLICE X position
@@ -317,7 +310,7 @@ proc loc_lut_out {index lut_x lut_y module_name WITH_ZYNQ} {
     if { $WITH_ZYNQ eq 0 } {
         set cell [get_cells "${module_name}/outs[$index].lut"]
     } else {
-        set cell [get_cells "design_0_i/${module_name}/inst/outs[$index].lut"]
+        set cell [get_cells "design_0_i/$top_module_name/inst/$module_name/outs[$index].lut"]
     }
     set_property LOC $slice_lut $cell
     set_property BEL A6LUT $cell
@@ -347,7 +340,7 @@ set x $X_BASE
 
 # Place ROI clock right after inputs
 puts "Placing ROI clock"
-loc_roi_clk_left $x $Y_CLK_BASE $module_name $WITH_ZYNQ
+loc_roi_clk_left $x $Y_CLK_BASE $top_module_name $module_name $WITH_ZYNQ
 
 # Place ROI inputs - not used for now
 #puts "Placing ROI inputs"
@@ -371,10 +364,10 @@ puts "yleft: ${Y_DOUT_BASE}, yright: ${Y_DOUT_BASE}"
 puts "Placing ROI outputs"
 for {set i 0} {$i < $DOUT_N} {incr i} {
     if {[net_bank_left "dout[$i]"]} {
-        loc_lut_out $i $XRAY_ROI_X0 $y_left $module_name $WITH_ZYNQ
+        loc_lut_out $i $XRAY_ROI_X0 $y_left $top_module_name $module_name $WITH_ZYNQ
         set y_left [expr {$y_left + $PITCH}]
     } else {
-        loc_lut_out $i $XRAY_ROI_X1 $y_right $module_name $WITH_ZYNQ
+        loc_lut_out $i $XRAY_ROI_X1 $y_right $top_module_name $module_name $WITH_ZYNQ
         set y_right [expr {$y_right + $PITCH}]
     }
 }
@@ -508,7 +501,7 @@ for {set i 0} {$i < $DOUT_N} {incr i} {
         if { $WITH_ZYNQ eq 0 } {
             route_via2 "$module_name/dout[$i]" "$node"
         } else {
-            route_via2 "design_0_i/$module_name/dout[$i]" "$node"
+            route_via2 "design_0_i/$top_module_name/dout[$i]" "$node"
         } 
         set y_left [expr {$y_left + $PITCH}]
         # XXX: only care about right ports on Arty
@@ -517,7 +510,7 @@ for {set i 0} {$i < $DOUT_N} {incr i} {
         if { $WITH_ZYNQ eq 0 } {
             route_via2 "$module_name/dout[$i]" "$node"
         } else {
-            route_via2 "design_0_i/$module_name/dout[$i]" "$node"
+            route_via2 "design_0_i/$top_module_name/dout[$i]" "$node"
         } 
         set y_right [expr {$y_right + $PITCH}]
     }
@@ -529,7 +522,7 @@ for {set i 0} {$i < $DOUT_N} {incr i} {
     if { $WITH_ZYNQ eq 0 } {
         set wires [get_wires -of_objects [get_nets "$module_name/dout[$i]"]]
     } else {
-        set wires [get_wires -of_objects [get_nets "design_0_i/$module_name/dout[$i]"]]
+        set wires [get_wires -of_objects [get_nets "design_0_i/$top_module_name/dout[$i]"]]
     }
     puts $fp_wires "$net $pin $wires"
 }

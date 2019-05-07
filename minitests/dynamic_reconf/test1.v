@@ -33,7 +33,7 @@ module test(input clk,
         (* KEEP, DONT_TOUCH *)
         always @(posedge clk) begin
             ticks <= ticks + 1;
-            if(ticks > 10000000) begin
+            if(ticks > 100000000) begin
                 ticks <= 0;
                 if(result > 6) begin
                     result <= 0;

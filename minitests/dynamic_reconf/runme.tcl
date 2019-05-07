@@ -88,7 +88,7 @@ set pincfg ""
 if { [info exists ::env(XRAY_PINCFG) ] } {
     set pincfg "$::env(XRAY_PINCFG)"
 }
-set roiv "../test1.v"
+set roiv "../blackbox.v"
 if { [info exists ::env(XRAY_ROIV) ] } {
     set roiv "$::env(XRAY_ROIV)"
 }

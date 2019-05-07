@@ -4,29 +4,36 @@
 
 set -ex
 
+if [ $1 == "BLACKBOX" ]; then
+    export XRAY_ROIV="../blackbox.v"
+elif [ $1 == "TEST1" ]; then
+    export XRAY_ROIV="../test1.v"
+elif [ $1 == "TEST2" ]; then
+    export XRAY_ROIV="../test2.v"
+else
+    echo "Please specify as argument: BLACKBOX, TEST1, TEST2"
+    exit 1
+fi
+
 source ${XRAY_DIR}/utils/environment.sh
 
 export XRAY_PINCFG=${XRAY_PINCFG:-ARTY-A7-SWBUT}
 export BUILD_DIR=${BUILD_DIR:-build}
 
-# not part of the normal DB
-# to generate:
-cat >/dev/null <<EOF
-pushd ${XRAY_DIR}
-source minitests/roi_harness/basys3.sh
-pushd fuzzers/001-part-yaml
-make clean
-make
-make pushdb
-popd
-popd
-EOF
-stat ${XRAY_DIR}/database/${XRAY_DATABASE}/${XRAY_PART}.yaml >/dev/null
+export ROI_MIN_X=36
+export ROI_MIN_Y=50
+export ROI_MAX_X=65
+export ROI_MAX_Y=99
+
+export GLOB_ROI_MIN_X=62
+export GLOB_ROI_MIN_Y=53
+export GLOB_ROI_MAX_X=104
+export GLOB_ROI_MAX_Y=103
 
 export PITCH=${XRAY_PITCH:-2}
 export DIN_N=${XRAY_DIN_N_LARGE:-0}
 export DOUT_N=${XRAY_DOUT_N_LARGE:-3}
-export XRAY_ROI=${XRAY_ROI_LARGE:-SLICE_X36Y50:SLICE_X65Y99}
+export XRAY_ROI=${XRAY_ROI_LARGE:-SLICE_X${ROI_MIN_X}Y${ROI_MIN_Y}:SLICE_X${ROI_MAX_X}Y${ROI_MAX_Y}}
 
 echo ${DIN_N}
 echo ${DOUT_N}
@@ -34,16 +41,6 @@ echo ${XRAY_ROI}
 
 mkdir -p $BUILD_DIR
 pushd $BUILD_DIR
-
-cat >defines.v <<EOF
-\`ifndef DIN_N
-\`define DIN_N $DIN_N
-\`endif
-
-\`ifndef DOUT_N
-\`define DOUT_N $DOUT_N
-\`endif
-EOF
 
 ${XRAY_VIVADO} -mode batch -source ../runme.tcl
 test -z "$(fgrep CRITICAL vivado.log)"
@@ -57,11 +54,16 @@ PYTHONPATH=$PYTHONPATH:$XRAY_DIR/utils python3 ../create_design_json.py \
     --pad_wires design_pad_wires.txt \
     --design_fasm design.fasm > design.json
 
+python3 ../extract_roi.py --fasm design.fasm --ltile ${ROI_MIN_X},${ROI_MIN_Y} \
+    --htile ${ROI_MAX_X},${ROI_MAX_Y} \
+    --ledge ${GLOB_ROI_MIN_X},${GLOB_ROI_MIN_Y} \
+    --hedge ${GLOB_ROI_MAX_X},${GLOB_ROI_MAX_Y}
+
 # Hack to get around weird clock error related to clk net not found
 # Remove following lines:
 #set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_IBUF]
 #set_property FIXED_ROUTE { { CLK_BUFG_BUFGCTRL0_O CLK_BUFG_CK_GCLK0 ... CLK_L1 CLBLM_M_CLK }  } [get_nets clk_net]
-if [ -f fixed.xdc ] ; then
-    cat fixed.xdc |fgrep -v 'CLOCK_DEDICATED_ROUTE FALSE' |fgrep -v 'set_property FIXED_ROUTE { { CLK_BUFG_BUFGCTRL0_O' >fixed_noclk.xdc
-fi
-popd
+#if [ -f fixed.xdc ] ; then
+#    cat fixed.xdc |fgrep -v 'CLOCK_DEDICATED_ROUTE FALSE' |fgrep -v 'set_property FIXED_ROUTE { { CLK_BUFG_BUFGCTRL0_O' >fixed_noclk.xdc
+#fi
+#popd

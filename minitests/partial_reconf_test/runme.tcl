@@ -116,28 +116,18 @@ if { $WITH_ZYNQ eq 0 } {
     create_project -force -part $::env(XRAY_PART) design design
     if { $WITH_BLACKBOX eq 1 } {
         set roiv "../blackbox.v"
-        read_verilog ../roib.v
-        set top_module_name "roib"
-        set module_name "blackbox"
-        read_verilog $roiv
-        set roiv_trim [string map {.v v} $roiv]
     } elseif { $WITH_TEST1 eq 1 } {
         set roiv "../test1.v"
-        read_verilog ../roi1.v
-        set top_module_name "roi1"
-        set module_name "test1"
-        read_verilog $roiv
-        set roiv_trim [string map {.v v} $roiv]
     } elseif { $WITH_TEST2 eq 1 } {
         set roiv "../test2.v"
-        read_verilog ../roi2.v
-        set top_module_name "roi2"
-        set module_name "test2"
-        read_verilog $roiv
-        set roiv_trim [string map {.v v} $roiv]
     } else {
         error "No BLACKBOX nor TEST1 nor TEST2 is set!"
     }
+
+    read_verilog ../roi.v
+    set top_module_name "roi"
+    set module_name "test"
+    read_verilog $roiv
 
     set fixed_xdc ""
     if { [info exists ::env(XRAY_FIXED_XDC) ] } {

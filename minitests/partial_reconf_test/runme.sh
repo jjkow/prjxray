@@ -35,14 +35,14 @@ elif [ $1 = "UTILS=1" ]; then
     ${XRAY_BITREAD} -o design.bits -y build/design.bit
     #${XRAY_SEGPRINT} design.bits -zd > design.segp
     python3 ${XRAY_DIR}/utils/bit2fasm.py build/design.bit > design.fasm
-    python3 ${XRAY_DIR}/utils/fasm2frames.py design.fasm design.frm
+    #python3 ${XRAY_DIR}/utils/fasm2frames.py design.fasm design.frm
     #PYTHONPATH=$PYTHONPATH:$XRAY_DIR/utils python3 create_design_json.py \
     #    --design_info_txt build/design_info.txt \
     #    --design_txt build/design.txt \
     #    --pad_wires build/design_pad_wires.txt \
     #    --design_fasm design.fasm > design.json
 
-    bash fasm2bit.sh partial.fasm blackbox.bit fixed.bit
+    bash fasm2bit.sh design.fasm blackbox.bit design.bit
     bootgen -image system.bif -w -o design.bit.bin
 else
     echo "Set UTILS=<value>!"

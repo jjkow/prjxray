@@ -27,8 +27,8 @@ echo "Design .fasm: $fasm_in"
 echo "Harness .bit: $bit_in"
 echo "Out .bit: $bit_out"
 
-#${XRAY_FASM2FRAMES} --sparse $fasm_in partial.frm
-${XRAY_FASM2FRAMES} $fasm_in partial.frm
+${XRAY_FASM2FRAMES} --sparse $fasm_in partial.frm
+#${XRAY_FASM2FRAMES} $fasm_in partial.frm
 
 ${XRAY_TOOLS_DIR}/xc7patch \
 	--part_name ${XRAY_PART} \

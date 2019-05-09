@@ -1,0 +1,30 @@
+1. cd to `minitests/partial_reconf_test`
+2. change in zybo.sh vars to:
+    export WITH_ZYNQ=1
+    export WITH_BOOTGEN=0
+    export WITH_BLACKBOX=1
+    export WITH_TEST1=0
+    export WITH_TEST2=0
+
+this will produce only "blackbox" + static logic
+which is single blinking LED
+
+3. ./runme.sh UTILS=0
+4. cp build/design.bit blackbox.bit
+5. change in zybo.sh vars to:
+    export WITH_ZYNQ=1
+    export WITH_BOOTGEN=0
+    export WITH_BLACKBOX=0
+    export WITH_TEST1=1
+    export WITH_TEST2=0
+
+this will fill the ROI with some additional logic
+which is 3-bit counter on LEDs.
+
+6. ./runme.sh UTILS=0
+7. ./runme.sg UTILS=1
+This produces design.fasm/frm and applies design.fasm
+to blackbox.bit -> which produces desgin.bit in example dir.
+Next it generates design.bit.bin
+(so make sure you have bootgen in PATH)
+8. I uploaded bitstreams to FPGA using fpga_manager on Zybo

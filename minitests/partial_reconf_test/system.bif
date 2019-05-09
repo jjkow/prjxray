@@ -1,4 +1,4 @@
 all:
 {
-	fixed.bit
+    design.bit
 }

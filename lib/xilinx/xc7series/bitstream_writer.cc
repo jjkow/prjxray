@@ -12,8 +12,8 @@ namespace xilinx {
 namespace xc7series {
 
 // Per UG470 pg 80: Bus Width Auto Detection
-std::array<uint32_t, 6> BitstreamWriter::header_{
-    0xFFFFFFFF, 0x000000BB, 0x11220044, 0xFFFFFFFF, 0xFFFFFFFF, 0xAA995566};
+std::array<uint32_t, 13> BitstreamWriter::header_{
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x000000BB, 0x11220044, 0xFFFFFFFF, 0xFFFFFFFF, 0xAA995566};
 
 /**************************************************
  * BitstreamWriter::BitstreamWriter

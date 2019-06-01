@@ -59,11 +59,7 @@ python3 ../extract_roi.py --fasm design.fasm --ltile ${ROI_MIN_X},${ROI_MIN_Y} \
     --ledge ${GLOB_ROI_MIN_X},${GLOB_ROI_MIN_Y} \
     --hedge ${GLOB_ROI_MAX_X},${GLOB_ROI_MAX_Y}
 
-# Hack to get around weird clock error related to clk net not found
-# Remove following lines:
-#set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_IBUF]
-#set_property FIXED_ROUTE { { CLK_BUFG_BUFGCTRL0_O CLK_BUFG_CK_GCLK0 ... CLK_L1 CLBLM_M_CLK }  } [get_nets clk_net]
-#if [ -f fixed.xdc ] ; then
-#    cat fixed.xdc |fgrep -v 'CLOCK_DEDICATED_ROUTE FALSE' |fgrep -v 'set_property FIXED_ROUTE { { CLK_BUFG_BUFGCTRL0_O' >fixed_noclk.xdc
-#fi
-#popd
+if [ $1 != "BLACKBOX" ]; then
+    bash ../fasm2bit.sh partial.fasm fixed.bit
+    python3 ${XRAY_DIR}/utils/bit2fasm.py --verbose fixed.bit > fixed.fasm
+fi

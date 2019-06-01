@@ -9,12 +9,12 @@ if [ -z "$fasm_in" ] ; then
     echo "need .fasm arg"
     exit
 fi
-bit_in=$2
-if [ -z "$bit_in" ] ; then
-    echo "need .bit arg"
-    exit
-fi
-bit_out=$3
+#bit_in=$2
+#if [ -z "$bit_in" ] ; then
+#    echo "need .bit arg"
+#    exit
+#fi
+bit_out=$2
 if [ -z "$bit_out" ] ; then
     bit_out=$(echo $fasm_in |sed s/.fasm/.bit/)
     if [ "$bit_out" = "$fasm_in" ] ; then
@@ -24,7 +24,7 @@ if [ -z "$bit_out" ] ; then
 fi
 
 echo "Design .fasm: $fasm_in"
-echo "Harness .bit: $bit_in"
+#echo "Harness .bit: $bit_in"
 echo "Out .bit: $bit_out"
 
 ${XRAY_FASM2FRAMES} --sparse $fasm_in roi_partial.frm
@@ -32,7 +32,6 @@ ${XRAY_FASM2FRAMES} --sparse $fasm_in roi_partial.frm
 ${XRAY_TOOLS_DIR}/xc7patch \
 	--part_name ${XRAY_PART} \
 	--part_file ${XRAY_PART_YAML} \
-	--bitstream_file $bit_in \
 	--frm_file roi_partial.frm \
 	--output_file $bit_out
 

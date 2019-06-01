@@ -36,10 +36,10 @@ DEFINE_string(output_file, "", "Write patched bitsteam to file");
 
 namespace xc7series = prjxray::xilinx::xc7series;
 
-int patch_frames(
+int partial_frames(
     const std::string& frm_file_str,
     std::map<xc7series::FrameAddress, std::vector<uint32_t>>* frames) {
-	// Apply the deltas.
+
 	std::ifstream frm_file(frm_file_str);
 	if (!frm_file) {
 		std::cerr << "Unable to open frm file: " << frm_file_str
@@ -58,16 +58,7 @@ int patch_frames(
 		uint32_t frame_address =
 		    std::stoul(frame_delta.first, nullptr, 16);
 
-		auto iter = frames->find(frame_address);
-		if (iter == frames->end()) {
-			std::cerr << "frame address 0x" << std::hex
-			          << frame_address
-			          << " because it was not found in frames."
-			          << std::endl;
-			return 1;
-		}
-
-		auto& frame_data = iter->second;
+		std::vector<uint32_t> frame_data;
 		frame_data.resize(101);
 
 		std::vector<std::string> frame_data_strings =
@@ -79,13 +70,11 @@ int patch_frames(
 			          << "words instead of 101";
 			continue;
 		};
-
 		std::transform(frame_data_strings.begin(),
 		               frame_data_strings.end(), frame_data.begin(),
 		               [](const std::string& val) -> uint32_t {
 			               return std::stoul(val, nullptr, 16);
 		               });
-
 		uint32_t ecc = 0;
 		for (size_t ii = 0; ii < frame_data.size(); ++ii) {
 			ecc = xc7series::icap_ecc(ii, frame_data[ii], ecc);
@@ -94,6 +83,7 @@ int patch_frames(
 		// Replace the old ECC with the new.
 		frame_data[0x32] &= 0xFFFFE000;
 		frame_data[0x32] |= (ecc & 0x1FFF);
+        frames->insert(std::pair<xc7series::FrameAddress, std::vector<uint32_t>>(frame_address, frame_data));
 	}
 
 	return 0;
@@ -108,47 +98,53 @@ int main(int argc, char* argv[]) {
 		std::cerr << "Part file not found or invalid" << std::endl;
 		return 1;
 	}
+	//auto bitstream_file =
+	//    prjxray::MemoryMappedFile::InitWithFile(FLAGS_bitstream_file);
+	//if (!bitstream_file) {
+	//	std::cerr << "Can't open base bitstream file: "
+	//	          << FLAGS_bitstream_file << std::endl;
+	//	return 1;
+	//}
 
-	auto bitstream_file =
-	    prjxray::MemoryMappedFile::InitWithFile(FLAGS_bitstream_file);
-	if (!bitstream_file) {
-		std::cerr << "Can't open base bitstream file: "
-		          << FLAGS_bitstream_file << std::endl;
-		return 1;
-	}
+	//auto bitstream_reader = xc7series::BitstreamReader::InitWithBytes(
+	//    bitstream_file->as_bytes());
+	//if (!bitstream_reader) {
+	//	std::cout
+	//	    << "Bitstream does not appear to be a 7-series bitstream!"
+	//	    << std::endl;
+	//	return 1;
+	//}
 
-	auto bitstream_reader = xc7series::BitstreamReader::InitWithBytes(
-	    bitstream_file->as_bytes());
-	if (!bitstream_reader) {
-		std::cout
-		    << "Bitstream does not appear to be a 7-series bitstream!"
-		    << std::endl;
-		return 1;
-	}
+	//auto bitstream_config =
+	//    xc7series::Configuration::InitWithPackets(*part, *bitstream_reader);
+	//if (!bitstream_config) {
+	//	std::cerr << "Bitstream does not appear to be for this part"
+	//	          << std::endl;
+	//	return 1;
+	//}
 
-	auto bitstream_config =
-	    xc7series::Configuration::InitWithPackets(*part, *bitstream_reader);
-	if (!bitstream_config) {
-		std::cerr << "Bitstream does not appear to be for this part"
-		          << std::endl;
-		return 1;
-	}
-
-	// Copy the base frames to a mutable collection
 	std::map<xc7series::FrameAddress, std::vector<uint32_t>> frames;
-	for (auto& frame_val : bitstream_config->frames()) {
-		auto& cur_frame = frames[frame_val.first];
-
-		std::copy(frame_val.second.begin(), frame_val.second.end(),
-		          std::back_inserter(cur_frame));
-	}
-
 	if (!FLAGS_frm_file.empty()) {
-		int ret = patch_frames(FLAGS_frm_file, &frames);
+		int ret = partial_frames(FLAGS_frm_file, &frames);
 		if (ret != 0) {
 			return ret;
 		}
 	}
+
+	// Copy the base frames to a mutable collection
+	//for (auto& frame_val : bitstream_config->frames()) {
+	//	auto& cur_frame = frames[frame_val.first];
+
+	//	std::copy(frame_val.second.begin(), frame_val.second.end(),
+	//	          std::back_inserter(cur_frame));
+	//}
+
+	//if (!FLAGS_frm_file.empty()) {
+	//	int ret = patch_frames(FLAGS_frm_file, &frames);
+	//	if (ret != 0) {
+	//		return ret;
+	//	}
+	//}
 
 	std::vector<std::unique_ptr<xc7series::ConfigurationPacket>>
 	    out_packets;
@@ -156,6 +152,7 @@ int main(int argc, char* argv[]) {
 	// Generate a single type 2 packet that writes everything at once.
 	std::vector<uint32_t> packet_data;
 	for (auto& frame : frames) {
+        std::cout<<"Load frm: "<<std::hex<<frame.first.operator uint32_t()<<std::endl;
 		std::copy(frame.second.begin(), frame.second.end(),
 		          std::back_inserter(packet_data));
 
@@ -170,21 +167,6 @@ int main(int argc, char* argv[]) {
 	}
 	packet_data.insert(packet_data.end(), 202, 0);
 
-	// Initialization sequence
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::TIMER, {0x0}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::WBSTAR, {0x0}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::NOP)}));
 	out_packets.emplace_back(new xc7series::NopPacket());
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
@@ -196,79 +178,41 @@ int main(int argc, char* argv[]) {
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::UNKNOWN, {0x0}));
-
-	// Configuration Options 0
-	out_packets.emplace_back(new xc7series::ConfigurationPacketWithPayload<
-	                         1>(
-	    xc7series::ConfigurationPacket::Opcode::Write,
-	    xc7series::ConfigurationRegister::COR0,
-	    {xc7series::ConfigurationOptions0Value()
-	         .SetAddPipelineStageForDoneIn(true)
-	         .SetReleaseDonePinAtStartupCycle(
-	             xc7series::ConfigurationOptions0Value::SignalReleaseCycle::
-	                 Phase4)
-	         .SetStallAtStartupCycleUntilDciMatch(
-	             xc7series::ConfigurationOptions0Value::StallCycle::NoWait)
-	         .SetStallAtStartupCycleUntilMmcmLock(
-	             xc7series::ConfigurationOptions0Value::StallCycle::NoWait)
-	         .SetReleaseGtsSignalAtStartupCycle(
-	             xc7series::ConfigurationOptions0Value::SignalReleaseCycle::
-	                 Phase5)
-	         .SetReleaseGweSignalAtStartupCycle(
-	             xc7series::ConfigurationOptions0Value::SignalReleaseCycle::
-	                 Phase6)}));
-
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::COR1, {0x0}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::IDCODE, {part->idcode()}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::SWITCH)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
+	        {static_cast<uint32_t>(xc7series::Command::NOP)}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::MASK, {0x401}));
+	        xc7series::ConfigurationRegister::MASK, {0x100}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CTL0, {0x501}));
+	        xc7series::ConfigurationRegister::CTL0, {0x100}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::MASK, {0x0}));
+	        xc7series::ConfigurationRegister::MASK, {0x400}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CTL1, {0x0}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::FAR, {0x0}));
+	        xc7series::ConfigurationRegister::CTL0, {0x400}));
+
+	// Frame data write 1?
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::CMD,
 	        {static_cast<uint32_t>(xc7series::Command::WCFG)}));
 	out_packets.emplace_back(new xc7series::NopPacket());
-
-	// Frame data write
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::FAR, {0xc00}));
+	out_packets.emplace_back(new xc7series::NopPacket());
 	out_packets.emplace_back(new xc7series::ConfigurationPacket(
 	    1, xc7series::ConfigurationPacket::Opcode::Write,
 	    xc7series::ConfigurationRegister::FDRI, {}));
@@ -280,42 +224,16 @@ int main(int argc, char* argv[]) {
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(new xc7series::NopPacket());
+	        xc7series::ConfigurationRegister::MASK, {0x100}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::GRESTORE)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::LFRM)}));
-	for (int ii = 0; ii < 100; ++ii) {
-		out_packets.emplace_back(new xc7series::NopPacket());
-	}
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CMD,
-	        {static_cast<uint32_t>(xc7series::Command::START)}));
-	out_packets.emplace_back(new xc7series::NopPacket());
+	        xc7series::ConfigurationRegister::CTL0, {0x0}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
 	        xc7series::ConfigurationRegister::FAR, {0x3be0000}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::MASK, {0x501}));
-	out_packets.emplace_back(
-	    new xc7series::ConfigurationPacketWithPayload<1>(
-	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::CTL0, {0x501}));
+
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
@@ -331,7 +249,6 @@ int main(int argc, char* argv[]) {
 	for (int ii = 0; ii < 400; ++ii) {
 		out_packets.emplace_back(new xc7series::NopPacket());
 	}
-
 	// Write bitstream.
 	xc7series::BitstreamWriter out_bitstream_writer(out_packets);
 	std::ofstream out_file(FLAGS_output_file);
@@ -346,7 +263,7 @@ int main(int argc, char* argv[]) {
 	std::vector<uint8_t> bit_header{0x0,  0x9,  0x0f, 0xf0, 0x0f,
 	                                0xf0, 0x0f, 0xf0, 0x0f, 0xf0,
 	                                0x00, 0x00, 0x01, 'a'};
-	auto build_source = absl::StrCat(FLAGS_frm_file, ";Generator=xc7patch");
+	auto build_source = absl::StrCat(FLAGS_frm_file, ";PARTIAL=TRUE;Generator=xc7patcher");
 	bit_header.push_back(
 	    static_cast<uint8_t>((build_source.size() + 1) >> 8));
 	bit_header.push_back(static_cast<uint8_t>(build_source.size() + 1));
@@ -410,6 +327,7 @@ int main(int argc, char* argv[]) {
 	out_file.put((length_of_data >> 16) & 0xFF);
 	out_file.put((length_of_data >> 8) & 0xFF);
 	out_file.put((length_of_data)&0xFF);
+    std::cout<<"TOTAL DATA: "<<length_of_data<<std::endl;
 
 	return 0;
 }

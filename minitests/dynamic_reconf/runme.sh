@@ -22,12 +22,12 @@ export BUILD_DIR=${BUILD_DIR:-build}
 
 export ROI_MIN_X=36
 export ROI_MIN_Y=50
-export ROI_MAX_X=65
+export ROI_MAX_X=39
 export ROI_MAX_Y=99
 
 export GLOB_ROI_MIN_X=62
 export GLOB_ROI_MIN_Y=53
-export GLOB_ROI_MAX_X=104
+export GLOB_ROI_MAX_X=65
 export GLOB_ROI_MAX_Y=103
 
 export PITCH=${XRAY_PITCH:-2}

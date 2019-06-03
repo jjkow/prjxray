@@ -5,14 +5,14 @@ module roi(input wire clk,
     //parameter DIN_N = 3;
 
     // STATIC LOGIC
-    reg [31:0] ticks = 0;
-    reg result = 0;
+    reg [31:0] stticks = 0;
+    reg stresult = 0;
     always @(posedge clk) begin
-        ticks <= ticks + 1;
-        if(ticks > 10000000) begin
-            ticks <= 0;
-            result <= !result;
-            blinky <= result;
+        stticks <= stticks + 1;
+        if(stticks > 10000000) begin
+            stticks <= 0;
+            stresult <= !stresult;
+            blinky <= stresult;
         end
     end
     // STATIC LOGIC

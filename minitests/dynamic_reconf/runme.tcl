@@ -368,13 +368,13 @@ if {$fixed_xdc eq ""} {
     # Shift y_right up to avoid PCIe block that makes routing hard.
     set y_right [expr {$Y_DIN_BASE + $Y_OFFSET}]
     for {set i 0} {$i < $DIN_N} {incr i} {
-        #if {[net_bank_left "din[$i]"]} {
-        #    loc_lut_in $i $XRAY_ROI_X0 $y_left
-        #    set y_left [expr {$y_left + $PITCH}]
-        #} else {
+        if {[net_bank_left "din[$i]"]} {
+            loc_lut_in $i $XRAY_ROI_X0 $y_left
+            set y_left [expr {$y_left + $PITCH}]
+        } else {
             loc_lut_in $i $XRAY_ROI_X1 $y_right
             set y_right [expr {$y_right + $PITCH}]
-        #}
+        }
     }
 
     # Place ROI outputs
@@ -395,63 +395,6 @@ if {$fixed_xdc eq ""} {
 place_design
 write_checkpoint -force placed.dcp
 
-# Version with more error checking for missing end node
-# Will do best effort in this case
-proc route_via2 {net nodes} {
-    # net: net as string
-    # nodes: string list of one or more intermediate routing nodes to visit
-
-    set net [get_nets $net]
-    puts "Started route via...$net"
-    # Start at the net source
-    set fixed_route [get_nodes -of_objects [get_site_pins -filter {DIRECTION == OUT} -of_objects $net]]
-    # End at the net destination
-    # For sone reason this doesn't always show up
-    set site_pins [get_site_pins -filter {DIRECTION == IN} -of_objects $net]
-    if {$site_pins eq ""} {
-        puts "WARNING: could not find end node"
-        #error "Could not find end node"
-    } else {
-        set end_node [get_nodes -of_objects]
-        lappend nodes [$end_node]
-    }
-
-    puts ""
-    puts "Routing net $net:"
-
-    foreach to_node $nodes {
-        if {$to_node eq ""} {
-            error "Empty node"
-        }
-
-        # Node string to object
-        set to_node [get_nodes -of_objects [get_wires $to_node]]
-        # Start at last routed position
-        set from_node [lindex $fixed_route end]
-        # Let vivado do heavy liftin in between
-        set route [find_routing_path -quiet -from $from_node -to $to_node]
-        if {$route == ""} {
-            # Some errors print a huge route
-            puts [concat [string range "  $from_node -> $to_node" 0 1000] ": no route found - assuming direct PIP"]
-            lappend fixed_route $to_node
-        } {
-            puts [concat [string range "  $from_node -> $to_node: $route" 0 1000] "routed"]
-            set fixed_route [concat $fixed_route [lrange $route 1 end]]
-        }
-        set_property -quiet FIXED_ROUTE $fixed_route $net
-    }
-
-    set_property -quiet FIXED_ROUTE $fixed_route $net
-    puts ""
-}
-
-# Return the wire on the ROI boundary
-proc node2wire {node} {
-    set wires [get_wires -of_objects [get_nodes $node]]
-    set wire [lsearch -inline $wires *VBRK*]
-    return $wire
-}
-
 proc write_grid_roi {fp} {
     puts $fp "GRID_X_MIN = $::env(XRAY_ROI_GRID_X1)"
     puts $fp "GRID_X_MAX = $::env(XRAY_ROI_GRID_X2)"
@@ -467,69 +410,6 @@ close $fp
 set fp [open "design.txt" w]
 set fp_wires [open "design_pad_wires.txt" w]
 puts $fp "name node pin wire"
-# Manual routing
-if {$fixed_xdc eq ""} {
-    set x $X_BASE
-
-    # No routing strictly needed for clk
-    # It will go to high level interconnect that goes everywhere
-    # But we still need to record something, so lets force a route
-    # FIXME: very ROI specific
-    set node "$XRAY_ROI_HCLK"
-    set wire [node2wire $node]
-    route_via2 "roi/clk_IBUF_BUFG" "$node"
-    set net "clk"
-    set pin "$net2pin($net)"
-    puts $fp "$net $node $pin $wire"
-
-    puts "Routing ROI inputs"
-    # Arbitrary offset as observed
-    set y_left $Y_DIN_BASE
-    set y_right [expr {$Y_DIN_BASE + $Y_OFFSET}]
-    for {set i 0} {$i < $DIN_N} {incr i} {
-        # needed to force routes away to avoid looping into ROI
-        #if {[net_bank_left "din[$i]"]} {
-        #    set node "INT_L_X${DIN_INT_L_X}Y${y_left}/${DIN_LPIP}"
-        #    route_via2 "din_IBUF[$i]" "$node"
-        #    set y_left [expr {$y_left + $PITCH}]
-        #} else {
-            set node "INT_R_X${DIN_INT_R_X}Y${y_right}/${DIN_RPIP}"
-            route_via2 "din_IBUF[$i]" "$node"
-            set y_right [expr {$y_right + $PITCH}]
-        #}
-        set net "din[$i]"
-        set pin "$net2pin($net)"
-        set wire [node2wire $node]
-        puts $fp "$net $node $pin $wire"
-
-        set wires [get_wires -of_objects [get_nets "din_IBUF[$i]"]]
-        puts $fp_wires "$net $pin $wires"
-    }
-
-    puts "Routing ROI outputs"
-    # Arbitrary offset as observed
-    set y_left [expr {$Y_DOUT_BASE + 0}]
-    set y_right [expr {$Y_DOUT_BASE + 0}]
-    for {set i 0} {$i < $DOUT_N} {incr i} {
-        #if {[net_bank_left "dout[$i]"]} {
-            set node "INT_L_X${DOUT_INT_L_X}Y${y_left}/${DOUT_LPIP}"
-            route_via2 "dout[$i]" "$node"
-            set y_left [expr {$y_left + $PITCH}]
-            # XXX: only care about right ports on Arty
-        #} else {
-        #    set node "INT_R_X${DOUT_INT_R_X}Y${y_right}/${DOUT_RPIP}"
-        #    route_via2 "test/dout[$i]" "$node"
-        #    set y_right [expr {$y_right + $PITCH}]
-        #}
-        set net "dout[$i]"
-        set pin "$net2pin($net)"
-        set wire [node2wire $node]
-        puts $fp "$net $node $pin $wire"
-
-        set wires [get_wires -of_objects [get_nets "test/dout[$i]"]]
-        puts $fp_wires "$net $pin $wires"
-    }
-}
 close $fp
 close $fp_wires
 
@@ -539,7 +419,7 @@ route_design
 # Don't set for user designs
 # Makes things easier to debug
 if {$fixed_xdc eq ""} {
-    set_property IS_ROUTE_FIXED 1 [get_nets -hierarchical]
+    #set_property IS_ROUTE_FIXED 1 [get_nets -hierarchical]
     #set_property IS_LOC_FIXED 1 [get_cells -hierarchical]
     #set_property IS_BEL_FIXED 1 [get_cells -hierarchical]
     write_xdc -force fixed.xdc

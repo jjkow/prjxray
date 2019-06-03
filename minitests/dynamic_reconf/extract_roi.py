@@ -17,8 +17,8 @@ def main():
 
     args = parser.parse_args()
 
-    majorx_min, majory_min = args.ltile.split(",")
-    majorx_max, majory_max = args.htile.split(",")
+    gridx_min, gridy_min = args.ltile.split(",")
+    gridx_max, gridy_max = args.htile.split(",")
     col_min, row_min = args.ledge.split(",")
     col_max, row_max = args.hedge.split(",")
 
@@ -33,8 +33,8 @@ def main():
             fasm_in_roi = False
             found_tile = False
 
-            # First check for tiles in major coords
-            for x in range(int(majorx_min), int(majorx_max) + 1):
+            # First check for tiles in grid coords
+            for x in range(int(gridx_min), int(gridx_max) + 1):
                 for t in tiles:
                     if t in l:
                         found_tile = True
@@ -42,7 +42,7 @@ def main():
                 if not found_tile:
                     # Invalid type, we need to check for CLK related
                     break
-                for y in range(int(majory_min), int(majory_max) + 1):
+                for y in range(int(gridy_min), int(gridy_max) + 1):
                     # We have a line with known type - check for coords
                     s = 'X' + str(x) + 'Y' + str(y)
                     if s in l:

@@ -318,6 +318,22 @@ opt_design
 place_design
 write_checkpoint -force placed.dcp
 
+proc write_grid_roi {fp} {
+    puts $fp "GRID_X_MIN = $::env(GLOB_ROI_X1)"
+    puts $fp "GRID_X_MAX = $::env(GLOB_ROI_X2)"
+    puts $fp "GRID_Y_MIN = $::env(GLOB_ROI_Y1)"
+    puts $fp "GRID_Y_MAX = $::env(GLOB_ROI_Y2)"
+}
+
+set fp [open "design_info.txt" w]
+write_grid_roi $fp
+close $fp
+set fp [open "design.txt" w]
+set fp_wires [open "design_pad_wires.txt" w]
+puts $fp "name node pin wire"
+close $fp
+close $fp_wires
+
 puts "routing design"
 route_design
 write_checkpoint -force design.dcp

@@ -3,8 +3,10 @@
 module test(input clk,
     output wire [2:0] dout);
     parameter DOUT_N = 3;
-    reg [2:0] result = 0;
+
+    (* KEEP, DONT_TOUCH *)
     reg [31:0] ticks = 0;
+    reg [2:0] result = 0;
 
     genvar i;
     generate
@@ -12,7 +14,7 @@ module test(input clk,
         (* KEEP, DONT_TOUCH *)
         reg clk_reg;
         always @(posedge clk) begin
-            clk_reg <= clk_reg;
+            clk_reg <= !clk_reg;
         end
 
         //DOUT
@@ -31,7 +33,7 @@ module test(input clk,
         end
 
         (* KEEP, DONT_TOUCH *)
-        always @(posedge clk) begin
+        always @(posedge clk_reg) begin
             ticks <= ticks + 1;
             if(ticks > 100000000) begin
                 ticks <= 0;

@@ -33,12 +33,17 @@ DEFINE_string(
     "bitstream.  Each line in the file is of the form: "
     "<frame_address> <word1>,...,<word101>.");
 DEFINE_string(output_file, "", "Write patched bitsteam to file");
+DEFINE_string(partial_bits,
+        "",
+        "Generate bitstream directly from frm file with partial bit setup"
+        "<partial>");
 
 namespace xc7series = prjxray::xilinx::xc7series;
 
 int patch_frames(
     const std::string& frm_file_str,
-    std::map<xc7series::FrameAddress, std::vector<uint32_t>>* frames) {
+    std::map<xc7series::FrameAddress, std::vector<uint32_t>>* frames,
+    bool partial_type) {
 	// Apply the deltas.
 	std::ifstream frm_file(frm_file_str);
 	if (!frm_file) {
@@ -58,16 +63,20 @@ int patch_frames(
 		uint32_t frame_address =
 		    std::stoul(frame_delta.first, nullptr, 16);
 
-		auto iter = frames->find(frame_address);
-		if (iter == frames->end()) {
-			std::cerr << "frame address 0x" << std::hex
-			          << frame_address
-			          << " because it was not found in frames."
-			          << std::endl;
-			return 1;
-		}
+		std::map<xc7series::FrameAddress, std::vector<uint32_t>>::iterator iter;
+        std::vector<uint32_t> frame_data;
 
-		auto& frame_data = iter->second;
+        if (!partial_type) {
+		    iter = frames->find(frame_address);
+		    if (iter == frames->end()) {
+		    	std::cerr << "frame address 0x" << std::hex
+		    	          << frame_address
+		    	          << " because it was not found in frames."
+		    	          << std::endl;
+		    	return 1;
+		    }
+		    frame_data = iter->second;
+        }
 		frame_data.resize(101);
 
 		std::vector<std::string> frame_data_strings =
@@ -94,84 +103,16 @@ int patch_frames(
 		// Replace the old ECC with the new.
 		frame_data[0x32] &= 0xFFFFE000;
 		frame_data[0x32] |= (ecc & 0x1FFF);
+        if (partial_type) {
+            frames->insert(std::pair<xc7series::FrameAddress, std::vector<uint32_t>>(frame_address, frame_data));
+        }
 	}
 
 	return 0;
 }
 
-int main(int argc, char* argv[]) {
-	gflags::SetUsageMessage(argv[0]);
-	gflags::ParseCommandLineFlags(&argc, &argv, true);
-
-	auto part = xc7series::Part::FromFile(FLAGS_part_file);
-	if (!part) {
-		std::cerr << "Part file not found or invalid" << std::endl;
-		return 1;
-	}
-
-	auto bitstream_file =
-	    prjxray::MemoryMappedFile::InitWithFile(FLAGS_bitstream_file);
-	if (!bitstream_file) {
-		std::cerr << "Can't open base bitstream file: "
-		          << FLAGS_bitstream_file << std::endl;
-		return 1;
-	}
-
-	auto bitstream_reader = xc7series::BitstreamReader::InitWithBytes(
-	    bitstream_file->as_bytes());
-	if (!bitstream_reader) {
-		std::cout
-		    << "Bitstream does not appear to be a 7-series bitstream!"
-		    << std::endl;
-		return 1;
-	}
-
-	auto bitstream_config =
-	    xc7series::Configuration::InitWithPackets(*part, *bitstream_reader);
-	if (!bitstream_config) {
-		std::cerr << "Bitstream does not appear to be for this part"
-		          << std::endl;
-		return 1;
-	}
-
-	// Copy the base frames to a mutable collection
-	std::map<xc7series::FrameAddress, std::vector<uint32_t>> frames;
-	for (auto& frame_val : bitstream_config->frames()) {
-		auto& cur_frame = frames[frame_val.first];
-
-		std::copy(frame_val.second.begin(), frame_val.second.end(),
-		          std::back_inserter(cur_frame));
-	}
-
-	if (!FLAGS_frm_file.empty()) {
-		int ret = patch_frames(FLAGS_frm_file, &frames);
-		if (ret != 0) {
-			return ret;
-		}
-	}
-
-	std::vector<std::unique_ptr<xc7series::ConfigurationPacket>>
-	    out_packets;
-
-	// Generate a single type 2 packet that writes everything at once.
-	std::vector<uint32_t> packet_data;
-	for (auto& frame : frames) {
-		std::copy(frame.second.begin(), frame.second.end(),
-		          std::back_inserter(packet_data));
-
-		auto next_address = part->GetNextFrameAddress(frame.first);
-		if (next_address &&
-		    (next_address->block_type() != frame.first.block_type() ||
-		     next_address->is_bottom_half_rows() !=
-		         frame.first.is_bottom_half_rows() ||
-		     next_address->row() != frame.first.row())) {
-			packet_data.insert(packet_data.end(), 202, 0);
-		}
-	}
-	packet_data.insert(packet_data.end(), 202, 0);
-
-	// Initialization sequence
-	out_packets.emplace_back(new xc7series::NopPacket());
+int generate_full_bit(std::vector<std::unique_ptr<xc7series::ConfigurationPacket>> &out_packets, std::vector<uint32_t> &packet_data, uint32_t idcode)
+{
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
@@ -226,7 +167,7 @@ int main(int argc, char* argv[]) {
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
-	        xc7series::ConfigurationRegister::IDCODE, {part->idcode()}));
+	        xc7series::ConfigurationRegister::IDCODE, {idcode}));
 	out_packets.emplace_back(
 	    new xc7series::ConfigurationPacketWithPayload<1>(
 	        xc7series::ConfigurationPacket::Opcode::Write,
@@ -331,7 +272,184 @@ int main(int argc, char* argv[]) {
 	for (int ii = 0; ii < 400; ++ii) {
 		out_packets.emplace_back(new xc7series::NopPacket());
 	}
+    return 0;
+}
 
+int generate_partial_bit(std::vector<std::unique_ptr<xc7series::ConfigurationPacket>> &out_packets,
+        std::vector<uint32_t> &packet_data, uint32_t idcode, uint32_t far_address)
+{
+	out_packets.emplace_back(new xc7series::NopPacket());
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
+	out_packets.emplace_back(new xc7series::NopPacket());
+	out_packets.emplace_back(new xc7series::NopPacket());
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::IDCODE, {idcode}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::NOP)}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::MASK, {0x100}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CTL0, {0x100}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::MASK, {0x400}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CTL0, {0x400}));
+
+	// Frame data write
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::WCFG)}));
+	out_packets.emplace_back(new xc7series::NopPacket());
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::FAR, {far_address}));
+	out_packets.emplace_back(new xc7series::NopPacket());
+	out_packets.emplace_back(new xc7series::ConfigurationPacket(
+	    1, xc7series::ConfigurationPacket::Opcode::Write,
+	    xc7series::ConfigurationRegister::FDRI, {}));
+	out_packets.emplace_back(new xc7series::ConfigurationPacket(
+	    2, xc7series::ConfigurationPacket::Opcode::Write,
+	    xc7series::ConfigurationRegister::FDRI, packet_data));
+
+	// Finalization sequence
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::MASK, {0x100}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CTL0, {0x0}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::FAR, {0x3be0000}));
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::RCRC)}));
+	out_packets.emplace_back(new xc7series::NopPacket());
+	out_packets.emplace_back(new xc7series::NopPacket());
+	out_packets.emplace_back(
+	    new xc7series::ConfigurationPacketWithPayload<1>(
+	        xc7series::ConfigurationPacket::Opcode::Write,
+	        xc7series::ConfigurationRegister::CMD,
+	        {static_cast<uint32_t>(xc7series::Command::DESYNC)}));
+	for (int ii = 0; ii < 400; ++ii) {
+		out_packets.emplace_back(new xc7series::NopPacket());
+	}
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
+	gflags::SetUsageMessage(argv[0]);
+	gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+	auto part = xc7series::Part::FromFile(FLAGS_part_file);
+	if (!part) {
+		std::cerr << "Part file not found or invalid" << std::endl;
+		return 1;
+	}
+
+    bool partial = (FLAGS_partial_bits == "partial");
+
+	std::map<xc7series::FrameAddress, std::vector<uint32_t>> frames;
+
+    if (partial) {
+	    if (!FLAGS_frm_file.empty()) {
+	    	int ret = patch_frames(FLAGS_frm_file, &frames, partial);
+	    	if (ret != 0) {
+	    		return ret;
+	    	}
+	    }
+    } else {
+	    auto bitstream_file =
+	        prjxray::MemoryMappedFile::InitWithFile(FLAGS_bitstream_file);
+	    if (!bitstream_file) {
+	    	std::cerr << "Can't open base bitstream file: "
+	    	          << FLAGS_bitstream_file << std::endl;
+	    	return 1;
+	    }
+
+	    auto bitstream_reader = xc7series::BitstreamReader::InitWithBytes(
+	        bitstream_file->as_bytes());
+	    if (!bitstream_reader) {
+	    	std::cout
+	    	    << "Bitstream does not appear to be a 7-series bitstream!"
+	    	    << std::endl;
+	    	return 1;
+	    }
+
+	    auto bitstream_config =
+	        xc7series::Configuration::InitWithPackets(*part, *bitstream_reader);
+	    if (!bitstream_config) {
+	    	std::cerr << "Bitstream does not appear to be for this part"
+	    	          << std::endl;
+	    	return 1;
+	    }
+	    // Copy the base frames to a mutable collection
+	    for (auto& frame_val : bitstream_config->frames()) {
+	    	auto& cur_frame = frames[frame_val.first];
+
+	    	std::copy(frame_val.second.begin(), frame_val.second.end(),
+	    	          std::back_inserter(cur_frame));
+	    }
+
+	    if (!FLAGS_frm_file.empty()) {
+	    	int ret = patch_frames(FLAGS_frm_file, &frames, false);
+	    	if (ret != 0) {
+	    		return ret;
+	    	}
+	    }
+    }
+
+	std::vector<std::unique_ptr<xc7series::ConfigurationPacket>>
+	    out_packets;
+
+	// Generate a single type 2 packet that writes everything at once.
+	std::vector<uint32_t> packet_data;
+    uint32_t far_address = frames.begin()->first.operator uint32_t();
+	for (auto& frame : frames) {
+		std::copy(frame.second.begin(), frame.second.end(),
+		          std::back_inserter(packet_data));
+
+		auto next_address = part->GetNextFrameAddress(frame.first);
+		if (next_address &&
+		    (next_address->block_type() != frame.first.block_type() ||
+		     next_address->is_bottom_half_rows() !=
+		         frame.first.is_bottom_half_rows() ||
+		     next_address->row() != frame.first.row())) {
+			packet_data.insert(packet_data.end(), 202, 0);
+		}
+	}
+	packet_data.insert(packet_data.end(), 202, 0);
+
+    if (partial) {
+        generate_partial_bit(out_packets, packet_data, part->idcode(), far_address);
+    } else {
+        generate_full_bit(out_packets, packet_data, part->idcode());
+    }
 	// Write bitstream.
 	xc7series::BitstreamWriter out_bitstream_writer(out_packets);
 	std::ofstream out_file(FLAGS_output_file);
@@ -346,7 +464,13 @@ int main(int argc, char* argv[]) {
 	std::vector<uint8_t> bit_header{0x0,  0x9,  0x0f, 0xf0, 0x0f,
 	                                0xf0, 0x0f, 0xf0, 0x0f, 0xf0,
 	                                0x00, 0x00, 0x01, 'a'};
-	auto build_source = absl::StrCat(FLAGS_frm_file, ";Generator=xc7patch");
+
+    std::string build_source;
+    if (partial) {
+	    build_source = absl::StrCat(FLAGS_frm_file, ";PARTIAL=TRUE;Generator=xc7patch");
+    } else {
+	    build_source = absl::StrCat(FLAGS_frm_file, ";Generator=xc7patch");
+    }
 	bit_header.push_back(
 	    static_cast<uint8_t>((build_source.size() + 1) >> 8));
 	bit_header.push_back(static_cast<uint8_t>(build_source.size() + 1));
